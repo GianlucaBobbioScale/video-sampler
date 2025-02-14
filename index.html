@@ -17,11 +17,58 @@
     </button>
     <br />
     <video id="videoPreview" width="600" controls></video>
+    <div id="videoInfo" style="font-family: monospace; margin: 10px 0"></div>
     <!-- This canvas is hidden but used for playback recording -->
     <canvas id="frameCanvas" style="display: none"></canvas>
+    <canvas id="thecanvas" style="display: none"></canvas>
+    <div id="thumbnailContainer"></div>
+    <!-- Added thecanvas -->
 
     <script>
       let currentVideoURL;
+
+      function formatTime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return `${h.toString().padStart(2, '0')}:${m
+          .toString()
+          .padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+      }
+
+      function generateThumbnail(i) {
+        // Generate thumbnail URL data
+        const thecanvas = document.getElementById('frameCanvas');
+        const video = document.getElementById('videoPreview');
+        var context = thecanvas.getContext('2d');
+
+        // Set canvas dimensions to downsample to a max of 400px width
+        const maxWidth = 400;
+        const scaleFactor = maxWidth / video.videoWidth;
+        thecanvas.width = maxWidth;
+        thecanvas.height = video.videoHeight * scaleFactor;
+
+        context.drawImage(
+          video,
+          0,
+          0,
+          video.videoWidth,
+          video.videoHeight,
+          0,
+          0,
+          thecanvas.width,
+          thecanvas.height
+        );
+        var dataURL = thecanvas.toDataURL();
+
+        //create img
+        var img = document.createElement('img');
+        img.setAttribute('src', dataURL);
+        // img.style.width = '100%'; // Ensure the image fits within the container
+
+        //append img in container div
+        document.getElementById('thumbnailContainer').appendChild(img);
+      }
 
       function loadVideo() {
         const fileInput = document.getElementById('fileInput');
@@ -63,6 +110,9 @@
         // Load the selected video into the video element.
         currentVideoURL = URL.createObjectURL(file);
         videoPreview.src = currentVideoURL;
+
+        let i = 0;
+
         videoPreview.load();
 
         // Once the video metadata is available, show the download button.
@@ -70,180 +120,126 @@
           'loadeddata',
           () => {
             document.getElementById('downloadBtn').style.display = 'inline';
+            videoPreview.currentTime = i;
+
+            // Display video info
+            const videoInfo = document.getElementById('videoInfo');
+
+            // Calculate FPS by analyzing frames over a short duration
+            let startTime = performance.now();
+            let frameCount = 0;
+            let fps = 0;
+
+            function countFrames() {
+              frameCount++;
+              const elapsedTime = (performance.now() - startTime) / 1000; // Convert to seconds
+
+              if (elapsedTime >= 1) {
+                // Measure for 1 second
+                fps = Math.round(frameCount / elapsedTime);
+                videoInfo.textContent =
+                  `Resolution: ${videoPreview.videoWidth}x${videoPreview.videoHeight} | ` +
+                  `FPS: ${fps} | ` +
+                  `Duration: ${formatTime(videoPreview.duration)}`;
+
+                videoPreview.removeEventListener(
+                  'requestAnimationFrame',
+                  countFrames
+                );
+              }
+            }
+
+            // Use requestAnimationFrame instead of timeupdate for more accurate frame counting
+            function animate() {
+              countFrames();
+              if (fps === 0) {
+                // Keep animating until we get the FPS
+                requestAnimationFrame(animate);
+              }
+            }
+
+            videoPreview.play();
+            requestAnimationFrame(animate);
+            setTimeout(() => videoPreview.pause(), 1000); // Pause after 1 second
           },
           { once: true }
         );
+
+        videoPreview.addEventListener('seeked', function () {
+          // now video has seeked and current frames will show
+          // at the time as we expect
+          generateThumbnail(i);
+
+          // when frame is captured, increase here by 5 seconds
+          i += 1;
+
+          // if we are not past end, seek to next interval
+          if (i <= 10) {
+            // this will trigger another seeked event
+            videoPreview.currentTime = i;
+          } else {
+            // grab all images and generate a video
+            // const thumbnailContainer =
+            //   document.getElementById('thumbnailContainer');
+            // const images = thumbnailContainer.getElementsByTagName('img');
+            // const canvas = document.createElement('canvas');
+            // const ctx = canvas.getContext('2d');
+            // // Set canvas size to match first image
+            // const firstImage = images[0];
+            // canvas.width = firstImage.width;
+            // canvas.height = firstImage.height;
+            // // Create MediaRecorder to generate video
+            // const stream = canvas.captureStream(30); // 30 FPS
+            // const mediaRecorder = new MediaRecorder(stream, {
+            //   mimeType: 'video/webm',
+            //   videoBitsPerSecond: 2500000, // 2.5 Mbps
+            // });
+            // const chunks = [];
+            // mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            // mediaRecorder.onstop = () => {
+            //   const blob = new Blob(chunks, { type: 'video/webm' });
+            //   const url = URL.createObjectURL(blob);
+            //   const a = document.createElement('a');
+            //   a.href = url;
+            //   a.download = 'thumbnails.webm';
+            //   a.click();
+            //   URL.revokeObjectURL(url);
+            // };
+            // mediaRecorder.start();
+            // // Draw each image to canvas with delay
+            // let idx = 0;
+            // function drawNextFrame() {
+            //   if (idx < images.length) {
+            //     ctx.drawImage(images[idx], 0, 0);
+            //     idx++;
+            //     setTimeout(drawNextFrame, 1000); // 100ms delay between frames
+            //   } else {
+            //     mediaRecorder.stop();
+            //   }
+            // }
+            // drawNextFrame();
+          }
+        });
       }
 
       async function downloadDownsample() {
-        const videoElement = document.getElementById('videoPreview');
-        const playbackCanvas = document.getElementById('frameCanvas');
-        const ctx = playbackCanvas.getContext('2d');
+        const video = document.getElementById('videoPreview');
+        video.addEventListener('seeked', function () {
+          // now video has seeked and current frames will show
+          // at the time as we expect
+          generateThumbnail(i);
 
-        // Settings
-        const desiredFPS = 12; // Target frames per second
-        const chunkDuration = 10; // Duration of each chunk (seconds)
-        const numberOfChunks = 3; // Number of chunks to record
+          // when frame is captured, increase here by 5 seconds
+          i += 5;
 
-        if (!videoElement.videoWidth || !videoElement.videoHeight) {
-          alert('Video metadata not loaded yet.');
-          return;
-        }
-
-        // Calculate chunk start times distributed across the video
-        const videoDuration = videoElement.duration;
-        const segmentSize =
-          (videoDuration - chunkDuration) / (numberOfChunks - 1);
-        const chunkStartTimes = Array.from(
-          { length: numberOfChunks },
-          (_, i) => {
-            return Math.min(i * segmentSize, videoDuration - chunkDuration);
+          // if we are not past end, seek to next interval
+          if (i <= this.duration) {
+            // this will trigger another seeked event
+            this.currentTime = i;
+          } else {
+            // Done!, next action
           }
-        );
-        console.log('Chunk start times:', chunkStartTimes);
-
-        // Set our target dimensions (fixed width, preserve aspect ratio)
-        const targetWidth = 480;
-        const targetHeight = Math.floor(
-          targetWidth * (videoElement.videoHeight / videoElement.videoWidth)
-        );
-        playbackCanvas.width = targetWidth;
-        playbackCanvas.height = targetHeight;
-
-        // Helper: wait for video to seek to a certain time.
-        function seekTo(time) {
-          return new Promise((resolve) => {
-            function onSeeked() {
-              videoElement.removeEventListener('seeked', onSeeked);
-              resolve();
-            }
-            videoElement.addEventListener('seeked', onSeeked);
-            videoElement.currentTime = time;
-          });
-        }
-
-        // =============================
-        // === FRAME EXTRACTION STEP ==
-        // =============================
-        const framesByChunk = [];
-
-        // Extract frames for each chunk
-        for (let chunkIndex = 0; chunkIndex < numberOfChunks; chunkIndex++) {
-          const startTime = chunkStartTimes[chunkIndex];
-          const frames = [];
-          const framesInChunk = chunkDuration * desiredFPS;
-
-          for (let frame = 0; frame < framesInChunk; frame++) {
-            const targetTime = startTime + frame / desiredFPS;
-            await seekTo(targetTime);
-            ctx.drawImage(videoElement, 0, 0, targetWidth, targetHeight);
-            const imageBitmap = await createImageBitmap(playbackCanvas);
-            frames.push(imageBitmap);
-          }
-          framesByChunk.push(frames);
-          console.log(
-            `Extracted ${frames.length} frames for chunk ${chunkIndex + 1}`
-          );
-        }
-
-        // =============================
-        // === FRAME PLAYBACK & RECORDER ==
-        // =============================
-        ctx.clearRect(0, 0, targetWidth, targetHeight);
-
-        const canvasStream = playbackCanvas.captureStream(desiredFPS);
-        const audioTrack = videoElement.captureStream().getAudioTracks()[0];
-        if (audioTrack) {
-          canvasStream.addTrack(audioTrack);
-        }
-
-        const mimeType = 'video/mp4; codecs=avc1.42E01E,mp4a.40.2';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          alert(
-            'MP4/H.264 recording with audio is not supported in this browser. Try using Chrome or Safari.'
-          );
-          return;
-        }
-
-        let currentChunk = 0;
-
-        function startNewChunk() {
-          const recorder = new MediaRecorder(canvasStream, {
-            mimeType: mimeType,
-            videoBitsPerSecond: 2500000,
-          });
-
-          const recordedChunks = [];
-          recorder.ondataavailable = (event) => {
-            if (event.data && event.data.size > 0) {
-              recordedChunks.push(event.data);
-            }
-          };
-
-          recorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const startTime = Math.floor(chunkStartTimes[currentChunk]);
-            a.download = `downsampled_${startTime}s_chunk${
-              currentChunk + 1
-            }.mp4`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            // Start next chunk if not finished
-            currentChunk++;
-            if (currentChunk < numberOfChunks) {
-              startPlaybackAndRecording();
-            }
-          };
-
-          return recorder;
-        }
-
-        function startPlaybackAndRecording() {
-          const recorder = startNewChunk();
-          const frames = framesByChunk[currentChunk];
-          let currentFrame = 0;
-          const frameInterval = 1000 / desiredFPS;
-
-          // Start playback of video audio from the correct position
-          videoElement.currentTime = chunkStartTimes[currentChunk];
-          videoElement.muted = false;
-          videoElement.play();
-
-          // Start recorder
-          recorder.start();
-
-          function playbackFrame() {
-            if (currentFrame < frames.length) {
-              ctx.clearRect(0, 0, targetWidth, targetHeight);
-              ctx.drawImage(
-                frames[currentFrame],
-                0,
-                0,
-                targetWidth,
-                targetHeight
-              );
-              currentFrame++;
-              setTimeout(playbackFrame, frameInterval);
-            } else {
-              // Playback complete for this chunk
-              setTimeout(() => {
-                recorder.stop();
-              }, 100);
-            }
-          }
-
-          // Start the playback loop
-          playbackFrame();
-        }
-
-        // Start the first chunk
-        startPlaybackAndRecording();
+        });
       }
     </script>
   </body>
